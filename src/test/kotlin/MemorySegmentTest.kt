@@ -17,8 +17,7 @@ class MemorySegmentTest {
     fun `nested structs have correct sizes, values and offsets`() {
         val segment = AllocatedMemorySegment.allocate(100.bytes)
         segment.withUse {
-            TestStruct().run {
-                allocatedSegment = segment
+            TestStruct().inSegment(segment) {
                 assertThat(size).isEqualTo(12.bytes)
 
                 assertThat(foo).isEqualTo(0)
@@ -31,11 +30,9 @@ class MemorySegmentTest {
                 assertThat(nested.segment.baseAddress).isEqualTo(8.bytes)
                 assertThat(nested.size).isEqualTo(4.bytes)
                 assertThat((nested.internalSegment as NestedMemorySegment).parent == segment)
-                with(nested) {
-                    assertThat(xyz).isEqualTo(0)
-                    xyz = 5
-                    assertThat(xyz).isEqualTo(5)
-                }
+                assertThat(nested.xyz).isEqualTo(0)
+                nested.xyz = 5
+                assertThat(nested.xyz).isEqualTo(5)
             }
         }
     }

@@ -42,6 +42,15 @@ abstract class Struct {
     }
 }
 
+fun <T: Struct> T.inSegment(segment: AllocatedMemorySegment, block: T.() -> Unit) {
+    allocatedSegment = segment
+    try {
+        block()
+    } finally {
+        allocatedSegment = null
+    }
+}
+
 sealed class Delegate<R: Struct, T>(val owner: Struct): ReadWriteProperty<R, T>
 
 class StructDelegate<T: Struct>(val theOwner: T) : Delegate<Struct, T>(theOwner) {
