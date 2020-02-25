@@ -1,63 +1,78 @@
-import kotlin.properties.ReadOnlyProperty
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
 abstract class Struct {
-    var baseAddress = Bytes(0)
-        internal set
-    var currentOffset = Bytes(0)
-        internal set
+    internal val children = mutableListOf<Delegate<*,*>>()
+    internal var allocatedSegment: AllocatedMemorySegment? = null
+        set(value) {
+            field = value
+            children.forEach { if(it.owner != this) it.owner.allocatedSegment = value }
+        }
+    internal var internalSegment: MutableMemorySegment = MutableMemorySegment(0.bytes, 0.bytes)
+    val segment: MemorySegment
+        get() = internalSegment
+
+    internal val baseAddress: Bytes
+        get() = internalSegment.baseAddress
     val size: Bytes
-        get() = currentOffset
+        get() = internalSegment.size
 
-    operator fun Int.Companion.provideDelegate(thisRef: Struct, prop: KProperty<*>): ReadWriteProperty<MemorySegment, Int> {
-        return IntDelegate(this@Struct).apply {
-            this@Struct.currentOffset += size
+    operator fun Int.Companion.provideDelegate(thisRef: Struct, prop: KProperty<*>): ReadWriteProperty<Struct, Int> {
+        return IntDelegate(thisRef).apply {
+            this@Struct.internalSegment.size += size
+            children.add(this)
         }
     }
-    operator fun Float.Companion.provideDelegate(thisRef: Struct, prop: KProperty<*>): ReadWriteProperty<MemorySegment, Float> {
-        return FloatDelegate(currentOffset).apply {
-            this@Struct.currentOffset += size
+    operator fun Float.Companion.provideDelegate(thisRef: Struct, prop: KProperty<*>): ReadWriteProperty<Struct, Float> {
+        return FloatDelegate(thisRef).apply {
+            this@Struct.internalSegment.size += size
+            children.add(this)
         }
     }
 
-    operator fun <T: Struct> T.provideDelegate(thisRef: Struct, prop: KProperty<*>): ReadOnlyProperty<MemorySegment, T> {
-        val nestedStruct = this@provideDelegate
+    operator fun <T: Struct> T.provideDelegate(thisRef: Struct, prop: KProperty<*>): StructDelegate<T> {
         val surroundingStruct = this@Struct
+        val nestedStruct = this@provideDelegate
 
         return StructDelegate(nestedStruct).apply {
-            nestedStruct.baseAddress = surroundingStruct.currentOffset
-            surroundingStruct.currentOffset += nestedStruct.size
+            nestedStruct.internalSegment = NestedMemorySegment(surroundingStruct.segment, surroundingStruct.size, nestedStruct.size)
+            surroundingStruct.internalSegment.size += nestedStruct.size
+            surroundingStruct.children.add(this)
         }
     }
 }
 
-class StructDelegate<T: Struct>(var underlying: T) : ReadOnlyProperty<MemorySegment, T> {
-    override fun getValue(thisRef: MemorySegment, property: KProperty<*>): T {
-        return underlying
+sealed class Delegate<R: Struct, T>(val owner: Struct): ReadWriteProperty<R, T>
+
+class StructDelegate<T: Struct>(val theOwner: T) : Delegate<Struct, T>(theOwner) {
+    override fun getValue(thisRef: Struct, property: KProperty<*>): T {
+        return theOwner
+    }
+
+    override fun setValue(thisRef: Struct, property: KProperty<*>, value: T) {
+        TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
     }
 }
-class IntDelegate(val parent: Struct) : ReadWriteProperty<MemorySegment, Int> {
-    private val offset = parent.currentOffset
-    override fun getValue(thisRef: MemorySegment, property: KProperty<*>): Int {
-        return thisRef.buffer.getInt(calculateResultAddress().value)
+
+class IntDelegate(underlying: Struct) : Delegate<Struct, Int>(underlying) {
+    override fun getValue(thisRef: Struct, property: KProperty<*>): Int {
+        return thisRef.allocatedSegment!!.buffer.getInt(thisRef.baseAddress.value)
     }
 
-    override fun setValue(thisRef: MemorySegment, property: KProperty<*>, value: Int) {
-        thisRef.buffer.putInt(calculateResultAddress().value, value)
+    override fun setValue(thisRef: Struct, property: KProperty<*>, value: Int) {
+        thisRef.allocatedSegment!!.buffer.putInt(thisRef.baseAddress.value, value)
     }
 
-    private fun calculateResultAddress() = (parent.baseAddress + offset)
     val size: Bytes
         get() = Bytes(4)
 }
-inline class FloatDelegate(val offset: Bytes) : ReadWriteProperty<MemorySegment, Float> {
-    override fun getValue(thisRef: MemorySegment, property: KProperty<*>): Float {
-        return thisRef.buffer.getFloat(offset.value)
+class FloatDelegate(underlying: Struct) : Delegate<Struct, Float>(underlying) {
+    override fun getValue(thisRef: Struct, property: KProperty<*>): Float {
+        return thisRef.allocatedSegment!!.buffer.getFloat(thisRef.baseAddress.value)
     }
 
-    override fun setValue(thisRef: MemorySegment, property: KProperty<*>, value: Float) {
-        thisRef.buffer.putFloat(offset.value, value)
+    override fun setValue(thisRef: Struct, property: KProperty<*>, value: Float) {
+        thisRef.allocatedSegment!!.buffer.putFloat(thisRef.baseAddress.value, value)
     }
     val size: Bytes
         get() = Bytes(4)

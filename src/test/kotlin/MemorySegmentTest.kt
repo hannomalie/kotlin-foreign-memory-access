@@ -4,20 +4,21 @@ import org.junit.jupiter.api.Test
 class MemorySegmentTest {
 
     private class NestedStruct: Struct() {
-        var MemorySegment.xyz by Int
+        var xyz by Int
     }
 
     private class TestStruct: Struct() {
-        var MemorySegment.foo by Int
-        var MemorySegment.bar by Float
-        val MemorySegment.nested by NestedStruct()
+        var foo by Int
+        var bar by Float
+        val nested by NestedStruct()
     }
 
     @Test
     fun `nested structs have correct sizes, values and offsets`() {
-        val segment = MemorySegment.allocate(100.bytes)
+        val segment = AllocatedMemorySegment.allocate(100.bytes)
         segment.withUse {
             TestStruct().run {
+                allocatedSegment = segment
                 assertThat(size).isEqualTo(12.bytes)
 
                 assertThat(foo).isEqualTo(0)
@@ -27,7 +28,9 @@ class MemorySegmentTest {
                 assertThat(bar).isEqualTo(2f)
 
                 assertThat(nested.baseAddress).isEqualTo(8.bytes)
-                assertThat(nested.currentOffset).isEqualTo(4.bytes)
+                assertThat(nested.segment.baseAddress).isEqualTo(8.bytes)
+                assertThat(nested.size).isEqualTo(4.bytes)
+                assertThat((nested.internalSegment as NestedMemorySegment).parent == segment)
                 with(nested) {
                     assertThat(xyz).isEqualTo(0)
                     xyz = 5
