@@ -12,6 +12,11 @@ interface MemorySegment {
     val size: Bytes
 }
 interface MutableMemorySegment: MemorySegment {
+    fun move(size: Bytes) {
+        val sizeTemp = size
+        baseAddress += sizeTemp
+    }
+
     override var baseAddress: Bytes
     override var size: Bytes
     companion object {
@@ -19,10 +24,12 @@ interface MutableMemorySegment: MemorySegment {
     }
 }
 data class MutableMemorySegmentImpl(override var baseAddress: Bytes, override var size: Bytes): MutableMemorySegment
-class NestedMemorySegment(val parent: MemorySegment, val offset: Bytes, override var size: Bytes): MutableMemorySegment {
+class NestedMemorySegment(val parent: MemorySegment, internal var offset: Bytes, override var size: Bytes): MutableMemorySegment {
     override var baseAddress: Bytes
         get() = parent.baseAddress + offset
-        set(value) = TODO()
+        set(value) { // This is strange...
+            offset = value
+        }
 }
 
 interface AllocatedMemorySegment: AutoCloseable, MemorySegment {
@@ -30,12 +37,10 @@ interface AllocatedMemorySegment: AutoCloseable, MemorySegment {
     companion object
 }
 
-inline fun <T : AutoCloseable?, R> T.withUse(block: T.() -> R): R = use(block)
-
 class DirectByteBufferMemorySegment(override val size: Bytes): AllocatedMemorySegment {
     override val buffer = ByteBuffer.allocateDirect(size.value).order(ByteOrder.nativeOrder())
     override val baseAddress = Bytes(0)
     override fun close() { }
 }
 
-fun AllocatedMemorySegment.Companion.allocate(size: Bytes): AllocatedMemorySegment = DirectByteBufferMemorySegment(size)
+operator fun AllocatedMemorySegment.Companion.invoke(size: Bytes): AllocatedMemorySegment = DirectByteBufferMemorySegment(size)

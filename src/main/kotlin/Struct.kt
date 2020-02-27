@@ -8,7 +8,7 @@ abstract class Struct {
             field = value
             children.forEach { if(it.owner != this) it.owner.allocatedSegment = value }
         }
-    internal var internalSegment: MutableMemorySegment = MutableMemorySegment(0.bytes, 0.bytes)
+    internal open var internalSegment: MutableMemorySegment = MutableMemorySegment(0.bytes, 0.bytes)
     val segment: MemorySegment
         get() = internalSegment
 
@@ -51,7 +51,9 @@ fun <T: Struct> T.inSegment(segment: AllocatedMemorySegment, block: T.() -> Unit
     }
 }
 
-sealed class Delegate<R: Struct, T>(val owner: Struct): ReadWriteProperty<R, T>
+sealed class Delegate<R: Struct, T>(val owner: Struct): ReadWriteProperty<R, T> {
+    val currentOffset = owner.internalSegment.size
+}
 
 class StructDelegate<T: Struct>(val theOwner: T) : Delegate<Struct, T>(theOwner) {
     override fun getValue(thisRef: Struct, property: KProperty<*>): T {
@@ -65,11 +67,11 @@ class StructDelegate<T: Struct>(val theOwner: T) : Delegate<Struct, T>(theOwner)
 
 class IntDelegate(underlying: Struct) : Delegate<Struct, Int>(underlying) {
     override fun getValue(thisRef: Struct, property: KProperty<*>): Int {
-        return thisRef.allocatedSegment!!.buffer.getInt(thisRef.baseAddress.value)
+        return thisRef.allocatedSegment!!.buffer.getInt(thisRef.baseAddress.value + currentOffset.value)
     }
 
     override fun setValue(thisRef: Struct, property: KProperty<*>, value: Int) {
-        thisRef.allocatedSegment!!.buffer.putInt(thisRef.baseAddress.value, value)
+        thisRef.allocatedSegment!!.buffer.putInt(thisRef.baseAddress.value + currentOffset.value, value)
     }
 
     val size: Bytes
@@ -77,12 +79,36 @@ class IntDelegate(underlying: Struct) : Delegate<Struct, Int>(underlying) {
 }
 class FloatDelegate(underlying: Struct) : Delegate<Struct, Float>(underlying) {
     override fun getValue(thisRef: Struct, property: KProperty<*>): Float {
-        return thisRef.allocatedSegment!!.buffer.getFloat(thisRef.baseAddress.value)
+        return thisRef.allocatedSegment!!.buffer.getFloat(thisRef.baseAddress.value + currentOffset.value)
     }
 
     override fun setValue(thisRef: Struct, property: KProperty<*>, value: Float) {
-        thisRef.allocatedSegment!!.buffer.putFloat(thisRef.baseAddress.value, value)
+        thisRef.allocatedSegment!!.buffer.putFloat(thisRef.baseAddress.value + currentOffset.value, value)
     }
     val size: Bytes
         get() = Bytes(4)
+}
+
+class StructArray<T: Struct>(size: Int, val factory: () -> T): Struct(), Iterable<T> {
+
+    override var internalSegment: MutableMemorySegment = MutableMemorySegment(0.bytes, Bytes(factory().size.value * size))
+
+    override fun iterator(): Iterator<T> {
+        return object: Iterator<T> {
+            var offset = 0.bytes
+            val element = factory().apply {
+                internalSegment = NestedMemorySegment(internalSegment, 0.bytes, this.size)
+            }
+            override fun hasNext(): Boolean {
+                return offset.value < internalSegment.size.value
+            }
+
+            override fun next(): T {
+                element.allocatedSegment = allocatedSegment
+                element.internalSegment.move(element.size)
+                offset += element.size
+                return element
+            }
+        }
+    }
 }
